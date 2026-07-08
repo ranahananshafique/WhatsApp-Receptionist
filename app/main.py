@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Form
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app import database as db
-from app.config import TWILIO_ACCOUNT_SID
+from app.config import WHATSAPP_VERIFY_TOKEN
 from app.llm_client import detect_language, extract_booking, generate_reply, strip_booking_json
 from app.models import MissedCallRequest
 from app.whatsapp import send_template_message, send_text_message
@@ -59,9 +59,25 @@ async def health_check():
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  WHATSAPP WEBHOOK – TWILIO VERIFICATION (NOT NEEDED FOR SANDBOX)
+#  WHATSAPP WEBHOOK – VERIFICATION (GET)
 # ══════════════════════════════════════════════════════════════════════
-# Twilio does not require a GET verification handshake like Meta.
+
+@app.get("/webhook", tags=["whatsapp"])
+async def verify_webhook(
+    hub_mode: str = Query("", alias="hub.mode"),
+    hub_verify_token: str = Query("", alias="hub.verify_token"),
+    hub_challenge: str = Query("", alias="hub.challenge"),
+):
+    """
+    Simulate webhook verification handshake.
+    We check the token matches the configured WHATSAPP_VERIFY_TOKEN.
+    """
+    if hub_mode == "subscribe" and hub_verify_token == WHATSAPP_VERIFY_TOKEN:
+        logger.info("Webhook verified successfully")
+        return PlainTextResponse(content=hub_challenge)
+
+    logger.warning("Webhook verification failed – token mismatch")
+    raise HTTPException(status_code=403, detail="Verification failed")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -69,26 +85,38 @@ async def health_check():
 # ══════════════════════════════════════════════════════════════════════
 
 @app.post("/webhook", tags=["whatsapp"])
-async def receive_message(
-    From: str = Form(None),
-    Body: str = Form(None)
-):
+async def receive_message(request: Request):
     """
-    Process incoming WhatsApp messages from Twilio API:
-      1. Parse Form payload to extract From and Body.
+    Process incoming WhatsApp messages from Meta Cloud API:
+      1. Parse JSON payload to extract From and Body.
       2. Load conversation history from SQLite.
       3. Detect language & call the LLM.
       4. Check if the LLM reply contains a booking intent (BOOKING_JSON).
       5. If yes → create mock booking, append confirmation.
-      6. Persist messages and send the reply back via Twilio API.
+      6. Persist messages and send the reply back via Meta API.
     """
-    if not From or not Body:
-        logger.warning("Failed to parse Twilio payload: missing From or Body")
-        return PlainTextResponse(content="Missing data", status_code=400)
+    payload = await request.json()
     
-    # Clean up phone number (Twilio sends whatsapp:+1234567890)
-    phone = From.replace("whatsapp:", "").lstrip("+")
-    user_text = Body.strip()
+    # Very basic parsing of the Meta WhatsApp webhook payload
+    try:
+        entry = payload.get("entry", [])[0]
+        changes = entry.get("changes", [])[0]
+        value = changes.get("value", {})
+        messages = value.get("messages", [])
+        
+        if not messages:
+            # Not a message event (e.g. status update), return OK
+            return JSONResponse({"status": "ok"})
+            
+        message = messages[0]
+        if message.get("type") != "text":
+            return JSONResponse({"status": "ok", "message": "unsupported type"})
+            
+        phone = message.get("from")
+        user_text = message.get("text", {}).get("body", "").strip()
+    except (IndexError, AttributeError):
+        logger.warning("Failed to parse Meta payload: %s", payload)
+        return JSONResponse({"status": "ok", "message": "parse_error"})
 
     logger.info("Incoming from %s: %s", phone, user_text[:120])
 

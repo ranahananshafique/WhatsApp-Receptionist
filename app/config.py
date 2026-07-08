@@ -17,10 +17,10 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "data" / "receptionist.db"
 
-# ── Twilio WhatsApp API ────────────────────────────────────────────────
-TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
-TWILIO_WHATSAPP_NUMBER: str = os.getenv("TWILIO_WHATSAPP_NUMBER", "")
+# ── Meta WhatsApp Cloud API ───────────────────────────────────────────
+WHATSAPP_VERIFY_TOKEN: str = os.getenv("WHATSAPP_VERIFY_TOKEN", "apex_clinic_verify_token")
+WHATSAPP_ACCESS_TOKEN: str = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+WHATSAPP_PHONE_NUMBER_ID: str = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
 
 # ── LLM (Qwen 2.5 via OpenAI-compatible API) ─────────────────────────
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")

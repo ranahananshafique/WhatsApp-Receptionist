@@ -17,13 +17,27 @@ BASE = "http://localhost:8000"
 
 
 def _whatsapp_payload(phone: str, text: str, name: str = "Test User") -> dict:
-    """Build a realistic Twilio WhatsApp webhook payload."""
+    """Build a realistic Meta WhatsApp webhook payload."""
     phone = phone.lstrip('+')
     return {
-        "From": f"whatsapp:+{phone}",
-        "To": "whatsapp:+14155238886",
-        "Body": text,
-        "ProfileName": name,
+        "object": "whatsapp_business_account",
+        "entry": [{
+            "id": "BUSINESS_ID",
+            "changes": [{
+                "field": "messages",
+                "value": {
+                    "messaging_product": "whatsapp",
+                    "contacts": [{"profile": {"name": name}, "wa_id": phone}],
+                    "messages": [{
+                        "from": phone,
+                        "id": "wamid.test123",
+                        "timestamp": "1719878400",
+                        "type": "text",
+                        "text": {"body": text}
+                    }]
+                }
+            }]
+        }]
     }
 
 
@@ -41,13 +55,22 @@ def main() -> None:
     print(f"   ✅ {r.json()}")
 
     # ── 2. Webhook verification ───────────────────────────────────────
-    print("\n🔐 [2] Webhook verification (Skipped for Twilio)...")
-    print("   ✅ Skipped")
+    print("\n🔐 [2] Webhook verification...")
+    r = client.get(
+        "/webhook",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "quantx",
+            "hub.challenge": "CHALLENGE_ACCEPTED",
+        },
+    )
+    assert r.status_code == 200 and r.text == "CHALLENGE_ACCEPTED", f"Verify failed: {r.text}"
+    print("   ✅ Verification passed")
 
     # ── 3. English greeting ───────────────────────────────────────────
     print("\n💬 [3] English greeting...")
     payload = _whatsapp_payload("971501234567", "Hi, what services do you offer?")
-    r = client.post("/webhook", data=payload)
+    r = client.post("/webhook", json=payload)
     print(f"   Status: {r.status_code}")
     print(f"   Response: {json.dumps(r.json(), indent=2)}")
 
@@ -58,7 +81,7 @@ def main() -> None:
         "مرحبا، ما هي الخدمات المتوفرة لديكم؟",
         name="أحمد",
     )
-    r = client.post("/webhook", data=payload)
+    r = client.post("/webhook", json=payload)
     print(f"   Status: {r.status_code}")
     print(f"   Response: {json.dumps(r.json(), indent=2)}")
 
@@ -69,7 +92,7 @@ def main() -> None:
         "I'd like to book Teeth Whitening for 2026-07-10 at 10:00 AM please.",
         name="Booking Tester",
     )
-    r = client.post("/webhook", data=payload)
+    r = client.post("/webhook", json=payload)
     print(f"   Status: {r.status_code}")
     print(f"   Response: {json.dumps(r.json(), indent=2)}")
 

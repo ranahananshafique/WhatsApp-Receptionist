@@ -8,7 +8,7 @@ A production-ready MVP for a **bilingual (English / Arabic)** WhatsApp AI recept
 
 | Feature | Description |
 |---|---|
-| **WhatsApp Webhook** | Handles Twilio incoming messages (POST) |
+| **WhatsApp Webhook** | Handles Meta Cloud API verification (GET) and incoming messages (POST) |
 | **Bilingual Support** | Auto-detects Arabic vs English and responds in the same language |
 | **Session Memory** | Last 10 messages per user stored in SQLite for contextual replies |
 | **Guardrailed LLM** | Strict system prompt with fixed business info (services, prices, hours) |
@@ -65,9 +65,9 @@ copy .env.example .env
 
 | Variable | Description | Default |
 |---|---|---|
-| `TWILIO_ACCOUNT_SID` | Your Twilio Account SID | *(required)* |
-| `TWILIO_AUTH_TOKEN` | Your Twilio Auth Token | *(required)* |
-| `TWILIO_WHATSAPP_NUMBER` | Your Twilio Sandbox Number | *(required)* |
+| `WHATSAPP_VERIFY_TOKEN` | Token you set in Meta's webhook config | `apex_clinic_verify_token` |
+| `WHATSAPP_ACCESS_TOKEN` | Meta Graph API permanent token | *(required for real WhatsApp)* |
+| `WHATSAPP_PHONE_NUMBER_ID` | Your WhatsApp Business phone number ID | *(required for real WhatsApp)* |
 | `LLM_BASE_URL` | OpenAI-compatible endpoint | `http://localhost:11434/v1` |
 | `LLM_MODEL` | Model name | `qwen2.5:3b` |
 
@@ -103,13 +103,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 curl http://localhost:8000/health
 ```
 
-### Simulate an Incoming WhatsApp Message (English)
+### Webhook Verification (GET)
 
 ```bash
-curl -X POST http://localhost:8000/webhook \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "From=whatsapp:+971501234567&Body=Hi, what services do you offer?&To=whatsapp:+14155238886"
+curl "http://localhost:8000/webhook?hub.mode=subscribe&hub.verify_token=apex_clinic_verify_token&hub.challenge=CHALLENGE_ACCEPTED"
 ```
+
+Expected response: `CHALLENGE_ACCEPTED`
 
 ### Simulate an Incoming WhatsApp Message (English)
 
@@ -142,16 +142,54 @@ curl -X POST http://localhost:8000/webhook \
 
 ```bash
 curl -X POST http://localhost:8000/webhook \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "From=whatsapp:+971509876543&Body=مرحبا، أريد حجز موعد لتبييض الأسنان يوم الأحد الساعة ١٠ صباحاً&To=whatsapp:+14155238886"
+  -H "Content-Type: application/json" \
+  -d '{
+    "object": "whatsapp_business_account",
+    "entry": [{
+      "id": "BUSINESS_ID",
+      "changes": [{
+        "field": "messages",
+        "value": {
+          "messaging_product": "whatsapp",
+          "contacts": [{"profile": {"name": "مستخدم"}, "wa_id": "971509876543"}],
+          "messages": [{
+            "from": "971509876543",
+            "id": "wamid.test456",
+            "timestamp": "1719878400",
+            "type": "text",
+            "text": {"body": "مرحبا، أريد حجز موعد لتبييض الأسنان يوم الأحد الساعة ١٠ صباحاً"}
+          }]
+        }
+      }]
+    }]
+  }'
 ```
 
 ### Simulate a Booking Request (English)
 
 ```bash
 curl -X POST http://localhost:8000/webhook \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "From=whatsapp:+971507777777&Body=I want to book a Teeth Whitening appointment on 2026-07-10 at 10:00&To=whatsapp:+14155238886"
+  -H "Content-Type: application/json" \
+  -d '{
+    "object": "whatsapp_business_account",
+    "entry": [{
+      "id": "BUSINESS_ID",
+      "changes": [{
+        "field": "messages",
+        "value": {
+          "messaging_product": "whatsapp",
+          "contacts": [{"profile": {"name": "Booking User"}, "wa_id": "971507777777"}],
+          "messages": [{
+            "from": "971507777777",
+            "id": "wamid.book001",
+            "timestamp": "1719878400",
+            "type": "text",
+            "text": {"body": "I want to book a Teeth Whitening appointment on 2026-07-10 at 10:00"}
+          }]
+        }
+      }]
+    }]
+  }'
 ```
 
 ### Trigger Missed-Call Follow-up
@@ -193,20 +231,21 @@ curl http://localhost:8000/history/971501234567
 
 **Message flow:**
 
-1. Twilio sends a POST to `/webhook` with the user's message as Form Data.
+1. Meta sends a POST to `/webhook` with the user's message.
 2. `main.py` parses the payload, loads the last 10 messages from SQLite.
 3. `llm_client.py` builds a guardrailed system prompt, calls Qwen 2.5.
 4. If the LLM reply contains `BOOKING_JSON: {...}`, the booking is saved.
-5. The cleaned reply (+ confirmation if booked) is sent back via Twilio API.
+5. The cleaned reply (+ confirmation if booked) is sent back via WhatsApp API.
 
 ---
 
 ## ⚙️ Production Deployment Notes
 
-- **Expose with ngrok** for Twilio webhook testing: `ngrok http 8000`
+- **Expose with ngrok** for Meta webhook testing: `ngrok http 8000`
 - **Use Gunicorn** in production: `gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker`
 - **Migrate to PostgreSQL** for multi-instance concurrency (replace SQLite).
-- **Setup Twilio WhatsApp Sender**: Ensure your webhook URL is set in the Twilio Console under WhatsApp Sandbox settings.
+- **Register WhatsApp templates** in the Meta Business dashboard for the missed-call flow.
+- **Add webhook signature verification** (X-Hub-Signature header) for security.
 
 ---
 

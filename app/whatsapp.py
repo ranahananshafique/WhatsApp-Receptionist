@@ -7,49 +7,64 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from twilio.rest import Client
-from twilio.base.exceptions import TwilioRestException
+import httpx
 
 from app.config import (
-    TWILIO_ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN,
-    TWILIO_WHATSAPP_NUMBER,
+    WHATSAPP_ACCESS_TOKEN,
+    WHATSAPP_PHONE_NUMBER_ID,
 )
 
 logger = logging.getLogger(__name__)
 
 def _format_phone(phone: str) -> str:
-    """Format phone number to Twilio format, needs whatsapp:+ prefix."""
+    """Format phone number to Meta format, just digits (no +)."""
     phone = phone.strip()
-    if not phone.startswith("whatsapp:"):
-        if not phone.startswith("+"):
-            phone = f"+{phone}"
-        phone = f"whatsapp:{phone}"
+    if phone.startswith("whatsapp:"):
+        phone = phone.replace("whatsapp:", "")
+    if phone.startswith("+"):
+        phone = phone.lstrip("+")
     return phone
 
 async def send_text_message(to: str, body: str) -> dict[str, Any]:
     """
-    Send a plain text WhatsApp message via Twilio API.
+    Send a plain text WhatsApp message via Meta Cloud API.
     """
-    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_WHATSAPP_NUMBER:
-        logger.error("Twilio credentials not configured.")
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        logger.error("WhatsApp credentials not configured.")
         return {"error": "not_configured"}
 
-    try:
-        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        message = client.messages.create(
-            from_=_format_phone(TWILIO_WHATSAPP_NUMBER),
-            body=body,
-            to=_format_phone(to)
-        )
-        logger.info("Twilio Message sent to %s (SID: %s)", to, message.sid)
-        return {"status": "sent", "sid": message.sid}
-    except TwilioRestException as exc:
-        logger.error("Twilio API error %s: %s", exc.status, exc.msg)
-        return {"error": exc.msg}
-    except Exception:
-        logger.exception("Failed to send Twilio message to %s", to)
-        return {"error": "send_failed"}
+    url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": _format_phone(to),
+        "type": "text",
+        "text": {"preview_url": False, "body": body}
+    }
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            logger.info("Meta Message sent to %s", to)
+            return data
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Meta API error %s: %s",
+                exc.response.status_code,
+                exc.response.text,
+            )
+            return {"error": exc.response.text}
+        except Exception:
+            logger.exception("Failed to send Meta message to %s", to)
+            return {"error": "send_failed"}
 
 
 async def send_template_message(
@@ -59,19 +74,49 @@ async def send_template_message(
     body_params: list[str] | None = None,
 ) -> dict[str, Any]:
     """
-    Send a WhatsApp Template message via Twilio API.
-    Twilio handles templates through the Content API or by passing 
-    ContentSid, but for the basic sandbox, plain text works.
-    We will just send a standard text for the missed call fallback.
+    Send a WhatsApp Template message via Meta Cloud API.
     """
-    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
-        logger.error("Twilio credentials not configured.")
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        logger.error("WhatsApp credentials not configured.")
         return {"error": "not_configured"}
 
-    # Twilio sandbox doesn't strictly enforce templates for user-initiated 
-    # conversations. For business-initiated, you need approved templates.
-    # We will simulate the template by sending the raw text.
-    logger.info("Sending template via standard text (Twilio handles template matching by body).")
+    url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
     
-    body = "Hi! 👋 We noticed we missed a call from you. How can Apex Clinic help you today?"
-    return await send_text_message(to=to, body=body)
+    components = []
+    if body_params:
+        parameters = [{"type": "text", "text": p} for p in body_params]
+        components.append({"type": "body", "parameters": parameters})
+        
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": _format_phone(to),
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": language_code},
+            "components": components
+        }
+    }
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            logger.info("Meta Template message sent to %s", to)
+            return data
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Meta API error %s: %s",
+                exc.response.status_code,
+                exc.response.text,
+            )
+            return {"error": exc.response.text}
+        except Exception:
+            logger.exception("Failed to send Meta template message to %s", to)
+            return {"error": "send_failed"}
