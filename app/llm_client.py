@@ -81,7 +81,9 @@ def _build_system_prompt(language: str) -> str:
 
     # English (default)
     return f"""You are a polite, professional AI receptionist at {BUSINESS_NAME}.
-You respond ONLY in English in this conversation. Be friendly yet concise.
+You respond ONLY in English in this conversation. Be friendly yet concise. 
+Whenever there is a 'Hello' or introductory message, do include an introductory
+part where you state the name, services offered and timings of the business
 
 Clinic Information:
   Name: {BUSINESS_NAME}

@@ -33,10 +33,13 @@ LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
 MAX_HISTORY_MESSAGES: int = int(os.getenv("MAX_HISTORY_MESSAGES", "10"))
 
 # ── Business Information (injected into the system prompt) ────────────
-BUSINESS_NAME: str = "Apex Clinic"
+BUSINESS_NAME: str = "QuantX Skin Salon"
 BUSINESS_SERVICES: list[dict] = [
-    {"name": "Teeth Whitening", "name_ar": "تبييض الأسنان", "price_aed": 500},
-    {"name": "Dental Clean", "name_ar": "تنظيف الأسنان", "price_aed": 300},
+    {"name": "Hydrafacial", "name_ar": "هيدرافيشيل", "price_aed": 400},
+    {"name": "Chemical Peel", "name_ar": "تقشير كيميائي", "price_aed": 350},
+    {"name": "Laser Hair Removal", "name_ar": "إزالة الشعر بالليزر", "price_aed": 500},
+    {"name": "Microneedling", "name_ar": "الوخز بالإبر الدقيقة", "price_aed": 600},
+    {"name": "Deep Cleansing Facial", "name_ar": "تنظيف عميق للبشرة", "price_aed": 250},
 ]
 BUSINESS_HOURS: str = "9 AM – 6 PM, Monday to Saturday"
 BUSINESS_HOURS_AR: str = "٩ صباحاً – ٦ مساءً، الاثنين إلى السبت"
