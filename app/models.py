@@ -77,7 +77,20 @@ class BookingDetails(BaseModel):
 class BookingRecord(BaseModel):
     id: int | None = None
     phone: str
+    patient_name: str = ""
     service: str
     date: str
     time: str
+    status: str = "pending"
+    is_premium: bool = False
+    payment_status: str = "none"
+    reminder_24h_sent: bool = False
+    reminder_3h_sent: bool = False
+    completed_at: str = ""
+    checkin_24h_sent: bool = False
+    checkin_response: str = ""
+    review_request_sent: bool = False
+    retention_sent_at: str = ""
+    language: str = "en"
     created_at: str = ""
+

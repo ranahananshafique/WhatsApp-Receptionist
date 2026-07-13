@@ -43,3 +43,32 @@ BUSINESS_SERVICES: list[dict] = [
 ]
 BUSINESS_HOURS: str = "9 AM – 6 PM, Monday to Saturday"
 BUSINESS_HOURS_AR: str = "٩ صباحاً – ٦ مساءً، الاثنين إلى السبت"
+
+# ── Module 2-5: Clinic Operations ─────────────────────────────────────
+CLINIC_MANAGER_PHONE: str = os.getenv("CLINIC_MANAGER_PHONE", "")
+CLINIC_PHONE: str = os.getenv("CLINIC_PHONE", "")
+CLINIC_LATITUDE: str = os.getenv("CLINIC_LATITUDE", "25.2048")
+CLINIC_LONGITUDE: str = os.getenv("CLINIC_LONGITUDE", "55.2708")
+CLINIC_ADDRESS: str = os.getenv("CLINIC_ADDRESS", "Dubai, UAE")
+
+# ── Payment Simulation ───────────────────────────────────────────────
+DEPOSIT_AMOUNT_AED: int = int(os.getenv("DEPOSIT_AMOUNT_AED", "50"))
+
+# ── Premium Services (require deposit for confirmation) ──────────────
+PREMIUM_SERVICES: list[str] = [
+    s.strip()
+    for s in os.getenv("PREMIUM_SERVICES", "Microneedling,Laser Hair Removal").split(",")
+    if s.strip()
+]
+
+# ── Retention Campaign Intervals (service → days since completion) ───
+RETENTION_INTERVALS: dict[str, int] = {
+    "Laser Hair Removal": 28,
+    "Deep Cleansing Facial": 30,
+    "Hydrafacial": 30,
+}
+
+# ── Google Review (placeholder for prototype) ────────────────────────
+GOOGLE_REVIEW_LINK: str = os.getenv(
+    "GOOGLE_REVIEW_LINK", "https://g.page/quantx-skin-salon/review"
+)
