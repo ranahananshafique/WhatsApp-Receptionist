@@ -393,6 +393,7 @@ async def get_patient(phone: str):
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     return patient
+<<<<<<< HEAD
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -455,3 +456,5 @@ async def trigger_review(booking_id: int):
     await send_review_request(booking)
     return {"status": "sent", "booking_id": booking_id, "type": "Google Review Request"}
 
+=======
+>>>>>>> 60e4d677d2bc8d70072f39cee57eb9f55ced4f8a
