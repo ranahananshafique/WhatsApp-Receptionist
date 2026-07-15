@@ -131,24 +131,29 @@ async def send_3h_reminder(booking: dict) -> None:
 # ── Button Callback Handlers ────────────────────────────────────────
 
 async def handle_confirmation(booking_id: int, phone: str) -> str:
-    """Handle [✅ Confirm] button tap. Returns reply text."""
+    """Handle [✅ Confirm] button tap or text confirmation. Returns reply text."""
     booking = db.get_booking_by_id(booking_id)
     if not booking:
         return "Sorry, we couldn't find that booking."
 
     db.update_booking_status(booking_id, "confirmed")
     lang = booking.get("language", "en")
+    name = booking.get("patient_name") or (db.get_patient(phone) or {}).get("name") or "Patient"
 
     if lang == "ar":
         return (
-            f"✅ تم تأكيد موعدك!\n\n"
+            f"✅ تم تأكيد موعدك بنجاح!\n\n"
+            f"🔖 رقم الحجز: #{booking['id']}\n"
+            f"👤 الاسم: {name}\n"
             f"📋 الخدمة: {booking['service']}\n"
             f"📅 التاريخ: {booking['date']}\n"
             f"🕐 الوقت: {booking['time']}\n\n"
             f"نتطلع لرؤيتك! 😊"
         )
     return (
-        f"✅ Your appointment is confirmed!\n\n"
+        f"✅ Your appointment has been confirmed!\n\n"
+        f"🔖 Booking ID: #{booking['id']}\n"
+        f"👤 Booking Name: {name}\n"
         f"📋 Service: {booking['service']}\n"
         f"📅 Date: {booking['date']}\n"
         f"🕐 Time: {booking['time']}\n\n"

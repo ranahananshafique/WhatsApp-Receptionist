@@ -243,6 +243,10 @@ def create_mock_booking(
     """
     is_premium = 1 if service in PREMIUM_SERVICES else 0
     with get_connection() as conn:
+        conn.execute(
+            "UPDATE bookings SET status = 'cancelled' WHERE phone = ? AND status = 'pending'",
+            (phone,),
+        )
         cursor = conn.execute(
             """
             INSERT INTO bookings
@@ -280,6 +284,16 @@ def get_booking_by_id(booking_id: int) -> dict | None:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM bookings WHERE id = ?", (booking_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_pending_booking(phone: str) -> dict | None:
+    """Return the most recent pending booking awaiting review/confirmation for a phone number."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM bookings WHERE phone = ? AND status = 'pending' ORDER BY id DESC LIMIT 1",
+            (phone,),
         ).fetchone()
     return dict(row) if row else None
 

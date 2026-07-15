@@ -40,6 +40,8 @@ BUSINESS_SERVICES: list[dict] = [
     {"name": "Laser Hair Removal", "name_ar": "إزالة الشعر بالليزر", "price_aed": 500},
     {"name": "Microneedling", "name_ar": "الوخز بالإبر الدقيقة", "price_aed": 600},
     {"name": "Deep Cleansing Facial", "name_ar": "تنظيف عميق للبشرة", "price_aed": 250},
+    {"name": "Teeth Whitening", "name_ar": "تبييض الأسنان", "price_aed": 500},
+    {"name": "Dental Clean", "name_ar": "تنظيف الأسنان", "price_aed": 300},
 ]
 BUSINESS_HOURS: str = "9 AM – 6 PM, Monday to Saturday"
 BUSINESS_HOURS_AR: str = "٩ صباحاً – ٦ مساءً، الاثنين إلى السبت"

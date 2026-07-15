@@ -21,9 +21,9 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app import database as db
 from app.config import WHATSAPP_VERIFY_TOKEN
-from app.llm_client import detect_language, extract_booking, generate_reply, strip_booking_json
+from app.llm_client import detect_language, extract_booking, generate_reply, get_greeting_response, strip_booking_json
 from app.models import MissedCallRequest
-from app.whatsapp import send_text_message, send_template_message
+from app.whatsapp import send_text_message, send_template_message, send_interactive_buttons
 from app.reminders import handle_confirmation, handle_pay_confirm, handle_reschedule
 from app.aftercare import handle_checkin_response
 from app.scheduler import start_scheduler, stop_scheduler
@@ -141,12 +141,87 @@ async def receive_message(request: Request):
         return JSONResponse({"status": "ok", "message": "unsupported_type"})
 
 
-# ── Text Message Handler (Phase 1 LLM Flow) ─────────────────────────
+def _is_confirmation_message(text: str) -> bool:
+    """Check if the user's text message is confirming a pending booking."""
+    cleaned = text.strip().lower()
+    if any(char.isdigit() for char in cleaned) and len(cleaned) > 10:
+        return False
+    confirm_phrases = {
+        "yes", "y", "confirm", "confirmed", "ok", "okay", "sure", "yep", "yeah",
+        "proceed", "book", "book it", "correct", "looks good", "perfect", "right",
+        "please", "yes please", "agree", "done", "yes confirm", "please confirm",
+        "نعم", "تأكيد", "موافق", "صحيح", "أكيد", "تمام", "احجز", "مظبوط",
+    }
+    if cleaned in confirm_phrases:
+        return True
+    words = set(cleaned.replace(",", " ").replace(".", " ").replace("!", " ").split())
+    confirm_words = {"yes", "confirm", "confirmed", "proceed", "correct", "نعم", "تأكيد", "موافق", "صحيح", "تمام"}
+    return bool(words & confirm_words)
+
+
+def _is_cancellation_message(text: str) -> bool:
+    cleaned = text.strip().lower()
+    cancel_phrases = {
+        "no", "n", "cancel", "change", "reschedule", "wrong", "stop", "incorrect", "don't", "dont",
+        "لا", "إلغاء", "تغيير", "خطأ", "غير صحيح",
+    }
+    if cleaned in cancel_phrases:
+        return True
+    words = set(cleaned.replace(",", " ").replace(".", " ").replace("!", " ").split())
+    cancel_words = {"cancel", "reschedule", "wrong", "incorrect", "إلغاء", "تغيير", "خطأ"}
+    return bool(words & cancel_words)
+
+
+def _is_greeting_message(text: str) -> bool:
+    cleaned = text.strip().lower()
+    booking_indicators = {
+        "book", "booking", "appointment", "schedule", "reschedule",
+        "tomorrow", "today", "monday", "tuesday", "wednesday", "thursday",
+        "friday", "saturday", "sunday", "am", "pm", "2024", "2025", "2026",
+        "حجز", "احجز", "موعد", "غدا", "غداً", "اليوم", "الساعة",
+    }
+    words = set(
+        cleaned.replace(",", " ").replace(".", " ").replace("!", " ").replace("؟", " ").replace("?", " ").split()
+    )
+    if words & booking_indicators:
+        return False
+
+    greeting_phrases = {
+        "hi", "hello", "hey", "greetings", "good morning", "good afternoon",
+        "good evening", "howdy", "welcome", "hey there", "hello there", "hi there",
+        "مرحبا", "مرحباً", "السلام عليكم", "سلام", "هلا", "أهلا", "أهلاً",
+        "صباح الخير", "مساء الخير", "يا هلا", "حياك",
+    }
+    if cleaned in greeting_phrases:
+        return True
+
+    service_inquiry_phrases = {
+        "what services do you offer", "what services do you have", "services offered",
+        "what do you offer", "list of services", "available services",
+        "ما هي الخدمات المتوفرة", "الخدمات المتوفرة", "ما هي الخدمات",
+    }
+    if any(p in cleaned for p in service_inquiry_phrases):
+        return True
+
+    greeting_words = {
+        "hi", "hello", "hey", "greetings", "salam",
+        "مرحبا", "مرحباً", "السلام", "هلا", "أهلا", "أهلاً",
+    }
+    if words & greeting_words:
+        service_inquiry_words = {
+            "services", "offer", "available", "menu", "price", "prices",
+            "خدمات", "الخدمات", "متوفرة", "المتوفرة", "أسعار", "الأسعار",
+        }
+        if len(words) <= 12 or (words & service_inquiry_words):
+            return True
+
+    return False
+
 
 async def _handle_text_message(
     phone: str, message: dict, contact_name: str
 ) -> JSONResponse:
-    """Handle a plain text WhatsApp message via the LLM."""
+    """Handle a plain text WhatsApp message via the LLM or booking confirmation."""
     user_text = message.get("text", {}).get("body", "").strip()
     logger.info("Incoming text from %s: %s", phone, user_text[:120])
 
@@ -154,51 +229,96 @@ async def _handle_text_message(
     language = detect_language(user_text)
     db.upsert_patient(phone, name=contact_name, language=language)
 
-    # ── 2. History + LLM call ────────────────────────────
+    # ── 2. Check pending review/confirmation ─────────────
+    pending = db.get_pending_booking(phone)
+    if pending:
+        if _is_confirmation_message(user_text):
+            logger.info("User confirmed pending booking #%s via text", pending["id"])
+            reply = await handle_confirmation(pending["id"], phone)
+            db.save_message(phone, "user", user_text)
+            db.save_message(phone, "assistant", reply)
+            await send_text_message(phone, reply)
+            return JSONResponse({"status": "ok"})
+        elif _is_cancellation_message(user_text):
+            logger.info("User cancelled pending booking #%s via text", pending["id"])
+            db.update_booking_status(pending["id"], "cancelled")
+
+    # ── 3. Check greeting message ────────────────────────
+    if _is_greeting_message(user_text):
+        logger.info("Greeting detected from %s: %s", phone, user_text[:60])
+        reply = get_greeting_response(language)
+        db.save_message(phone, "user", user_text)
+        db.save_message(phone, "assistant", reply)
+        await send_text_message(phone, reply)
+        return JSONResponse({"status": "ok"})
+
+    # ── 4. History + LLM call ────────────────────────────
     history = db.get_history(phone)
     raw_reply = await generate_reply(history, user_text, language)
     logger.info("LLM raw reply: %s", raw_reply[:200])
 
-    # ── 3. Booking extraction ────────────────────────────
-    booking = extract_booking(raw_reply)
+    # ── 4. Booking extraction ────────────────────────────
+    booking = extract_booking(raw_reply, user_text)
     display_reply = strip_booking_json(raw_reply)
 
     if booking:
         logger.info("Booking detected: %s", booking)
+        booking_name = contact_name or (db.get_patient(phone) or {}).get("name") or "Patient"
         result = db.create_mock_booking(
             phone=phone,
             service=booking["service"],
             date=booking["date"],
             time=booking["time"],
-            patient_name=contact_name,
+            patient_name=booking_name,
             language=language,
         )
         if language == "ar":
-            confirmation = (
-                f"📅 تم جدولة موعدك!\n"
+            review_msg = (
+                f"📋 يرجى مراجعة تفاصيل حجزك:\n"
+                f"🔖 رقم الحجز: #{result['booking_id']}\n"
+                f"👤 الاسم: {booking_name}\n"
                 f"📋 الخدمة: {result['service']}\n"
                 f"📅 التاريخ: {result['date']}\n"
-                f"🕐 الوقت: {result['time']}\n"
-                f"🔖 رقم الحجز: #{result['booking_id']}\n\n"
-                f"📲 ستتلقى تذكيراً للتأكيد قبل 24 ساعة من موعدك."
+                f"🕐 الوقت: {result['time']}\n\n"
+                f"يرجى التأكيد لإتمام الحجز."
             )
+            btn_confirm = "✅ تأكيد"
+            btn_reschedule = "📅 إعادة جدولة"
         else:
-            confirmation = (
-                f"📅 Your appointment has been scheduled!\n"
+            review_msg = (
+                f"📋 Please review your booking details:\n"
+                f"🔖 Booking ID: #{result['booking_id']}\n"
+                f"👤 Booking Name: {booking_name}\n"
                 f"📋 Service: {result['service']}\n"
                 f"📅 Date: {result['date']}\n"
-                f"🕐 Time: {result['time']}\n"
-                f"🔖 Booking ID: #{result['booking_id']}\n\n"
-                f"📲 You'll receive a confirmation reminder 24 hours before your appointment."
+                f"🕐 Time: {result['time']}\n\n"
+                f"Please confirm to book your appointment."
             )
+            btn_confirm = "✅ Confirm"
+            btn_reschedule = "📅 Reschedule"
+
         if result.get("is_premium"):
             if language == "ar":
-                confirmation += "\n💎 هذه خدمة مميزة — ستحتاج لدفع وديعة لتأكيد الحجز."
+                review_msg += "\n💎 هذه خدمة مميزة — ستحتاج لدفع وديعة لتأكيد الحجز."
             else:
-                confirmation += "\n💎 This is a premium service — a deposit will be required to confirm."
-        display_reply = f"{display_reply}\n\n{confirmation}" if display_reply else confirmation
+                review_msg += "\n💎 This is a premium service — a deposit will be required upon confirmation."
+        display_reply = f"{display_reply}\n\n{review_msg}" if display_reply else review_msg
 
-    # ── 4. Persist & send ────────────────────────────────
+        db.save_message(phone, "user", user_text)
+        db.save_message(phone, "assistant", display_reply)
+
+        buttons = [
+            {"id": f"confirm:{result['booking_id']}", "title": btn_confirm},
+            {"id": f"reschedule:{result['booking_id']}", "title": btn_reschedule},
+        ]
+        await send_interactive_buttons(
+            to=phone,
+            body_text=display_reply,
+            buttons=buttons,
+        )
+        return JSONResponse({"status": "ok"})
+
+    # ── 5. Persist & send ────────────────────────────────
     db.save_message(phone, "user", user_text)
     db.save_message(phone, "assistant", display_reply)
 
@@ -393,7 +513,6 @@ async def get_patient(phone: str):
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     return patient
-<<<<<<< HEAD
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -445,7 +564,6 @@ async def trigger_retention(booking_id: int):
     return {"status": "sent", "booking_id": booking_id, "type": "Retention Campaign"}
 
 
-
 @app.post("/admin/trigger/review/{booking_id}", tags=["demo"])
 async def trigger_review(booking_id: int):
     """Instantly send the Google Review request (Module 5) on WhatsApp."""
@@ -456,5 +574,3 @@ async def trigger_review(booking_id: int):
     await send_review_request(booking)
     return {"status": "sent", "booking_id": booking_id, "type": "Google Review Request"}
 
-=======
->>>>>>> 60e4d677d2bc8d70072f39cee57eb9f55ced4f8a
